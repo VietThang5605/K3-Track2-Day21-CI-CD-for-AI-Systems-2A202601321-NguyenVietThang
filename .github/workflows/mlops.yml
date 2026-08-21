@@ -72,21 +72,62 @@ jobs:
           CREDS: ${{ secrets.CLOUD_CREDENTIALS }}
         run: |
           python - <<'EOF'
-          import os, json, ast
+          import os, json, ast, re
 
           raw = os.environ.get("CREDS", "").strip()
-          creds = {}
+          key_id, secret_key, region = "", "", "ap-southeast-1"
+
+          # 1. Thử parse dạng JSON / Python Dict
           try:
-              creds = json.loads(raw)
+              data = json.loads(raw)
+              if isinstance(data, dict):
+                  for k, v in data.items():
+                      kl = k.lower()
+                      if "access_key" in kl:
+                          key_id = str(v).strip()
+                      elif "secret" in kl:
+                          secret_key = str(v).strip()
+                      elif "region" in kl:
+                          region = str(v).strip()
           except Exception:
               try:
-                  creds = ast.literal_eval(raw)
-              except Exception as e:
-                  print(f"Warning parsing credentials: {e}")
+                  data = ast.literal_eval(raw)
+                  if isinstance(data, dict):
+                      for k, v in data.items():
+                          kl = k.lower()
+                          if "access_key" in kl:
+                              key_id = str(v).strip()
+                          elif "secret" in kl:
+                              secret_key = str(v).strip()
+                          elif "region" in kl:
+                              region = str(v).strip()
+              except Exception:
+                  pass
 
-          key_id = str(creds.get("aws_access_key_id", "")).strip()
-          secret_key = str(creds.get("aws_secret_access_key", "")).strip()
-          region = str(creds.get("aws_region", "ap-southeast-1")).strip()
+          # 2. Thử parse dạng INI / Key=Value / Key:Value theo từng dòng
+          if not key_id or not secret_key:
+              for line in raw.splitlines():
+                  line = line.strip()
+                  if "=" in line or ":" in line:
+                      sep = "=" if "=" in line else ":"
+                      k, v = line.split(sep, 1)
+                      kl = k.strip().lower()
+                      val = v.strip().strip("'\"")
+                      if "access_key" in kl:
+                          key_id = val
+                      elif "secret" in kl:
+                          secret_key = val
+                      elif "region" in kl:
+                          region = val
+
+          # 3. Trích xuất Regex nếu vẫn chưa tìm thấy
+          if not key_id:
+              m = re.search(r'(AKIA[0-9A-Z]{16})', raw)
+              if m:
+                  key_id = m.group(1)
+
+          if not key_id or not secret_key:
+              raise SystemExit(f"ERROR: Khong the trich xuat AWS credentials tu CLOUD_CREDENTIALS secret. Do dai chuoi nhan duoc: {len(raw)}")
 
           # 1. Ghi vào biến môi trường GitHub Actions
           with open(os.environ["GITHUB_ENV"], "a") as f:
@@ -104,8 +145,10 @@ jobs:
           with open(os.path.join(aws_dir, "config"), "w") as f:
               f.write(f"[default]\nregion = {region}\n")
           
-          print("AWS credentials and ~/.aws config created successfully.")
+          masked_key = key_id[:4] + "..." + key_id[-4:] if len(key_id) >= 8 else "***"
+          print(f"AWS credentials configured successfully. Access Key: {masked_key}, Region: {region}")
           EOF
+
 
       - name: Verify AWS Connection
         run: |
