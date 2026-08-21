@@ -107,8 +107,13 @@ jobs:
           EOF
 
       - name: Pull data with DVC
-        # 3. Pull các file dữ liệu cần thiết từ AWS S3 bằng lệnh dvc pull
-        run: dvc pull data/train_phase1.csv.dvc data/eval.csv.dvc
+        # 3. Cấu hình DVC remote credentials và pull dữ liệu từ AWS S3
+        run: |
+          dvc remote modify myremote access_key_id "$AWS_ACCESS_KEY_ID" --local
+          dvc remote modify myremote secret_access_key "$AWS_SECRET_ACCESS_KEY" --local
+          dvc remote modify myremote region "$AWS_REGION" --local
+          dvc pull data/train_phase1.csv.dvc data/eval.csv.dvc -v
+
 
 
       - name: Train model
