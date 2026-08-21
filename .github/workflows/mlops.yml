@@ -84,21 +84,32 @@ jobs:
               except Exception as e:
                   print(f"Warning parsing credentials: {e}")
 
-          key_id = creds.get("aws_access_key_id", "")
-          secret_key = creds.get("aws_secret_access_key", "")
-          region = creds.get("aws_region", "ap-southeast-1")
+          key_id = str(creds.get("aws_access_key_id", "")).strip()
+          secret_key = str(creds.get("aws_secret_access_key", "")).strip()
+          region = str(creds.get("aws_region", "ap-southeast-1")).strip()
 
+          # 1. Ghi vào biến môi trường GitHub Actions
           with open(os.environ["GITHUB_ENV"], "a") as f:
               f.write(f"AWS_ACCESS_KEY_ID={key_id}\n")
               f.write(f"AWS_SECRET_ACCESS_KEY={secret_key}\n")
+              f.write(f"AWS_REGION={region}\n")
               f.write(f"AWS_DEFAULT_REGION={region}\n")
+
+          # 2. Tạo file cấu hình ~/.aws/credentials và ~/.aws/config cho DVC/s3fs
+          aws_dir = os.path.expanduser("~/.aws")
+          os.makedirs(aws_dir, exist_ok=True)
+          with open(os.path.join(aws_dir, "credentials"), "w") as f:
+              f.write(f"[default]\naws_access_key_id = {key_id}\naws_secret_access_key = {secret_key}\n")
+          with open(os.path.join(aws_dir, "config"), "w") as f:
+              f.write(f"[default]\nregion = {region}\n")
           
-          print("AWS credentials configured successfully.")
+          print("AWS credentials and ~/.aws config created successfully.")
           EOF
 
       - name: Pull data with DVC
         # 3. Pull các file dữ liệu cần thiết từ AWS S3 bằng lệnh dvc pull
         run: dvc pull data/train_phase1.csv.dvc data/eval.csv.dvc
+
 
       - name: Train model
         run: python src/train.py
