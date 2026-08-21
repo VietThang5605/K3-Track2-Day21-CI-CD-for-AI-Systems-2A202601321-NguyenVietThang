@@ -72,10 +72,18 @@ jobs:
           CREDS: ${{ secrets.CLOUD_CREDENTIALS }}
         run: |
           python - <<'EOF'
-          import os, json, ast, re
+          import os, json, ast, re, base64
 
           raw = os.environ.get("CREDS", "").strip()
           key_id, secret_key, region = "", "", "ap-southeast-1"
+
+          # 0. Giải mã nếu là Base64
+          try:
+              decoded = base64.b64decode(raw).decode("utf-8")
+              if "AKIA" in decoded:
+                  raw = decoded
+          except Exception:
+              pass
 
           # 1. Thử parse dạng JSON / Python Dict
           try:
@@ -120,14 +128,20 @@ jobs:
                       elif "region" in kl:
                           region = val
 
-          # 3. Trích xuất Regex nếu vẫn chưa tìm thấy
+          # 3. Trích xuất trực tiếp bằng Pattern chuẩn của AWS (AKIA 20 ký tự & Secret 40 ký tự)
           if not key_id:
-              m = re.search(r'(AKIA[0-9A-Z]{16})', raw)
-              if m:
-                  key_id = m.group(1)
+              m_key = re.search(r'(AKIA[0-9A-Z]{16})', raw)
+              if m_key:
+                  key_id = m_key.group(1)
+          
+          if not secret_key and key_id:
+              raw_without_key = raw.replace(key_id, "")
+              m_sec = re.search(r'([A-Za-z0-9/+=]{40})', raw_without_key)
+              if m_sec:
+                  secret_key = m_sec.group(1)
 
           if not key_id or not secret_key:
-              raise SystemExit(f"ERROR: Khong the trich xuat AWS credentials tu CLOUD_CREDENTIALS secret. Do dai chuoi nhan duoc: {len(raw)}")
+              raise SystemExit(f"ERROR: Khong the trich xuat AWS credentials. Key tim thay: {bool(key_id)}, Secret tim thay: {bool(secret_key)}. Do dai chuoi: {len(raw)}")
 
           # 1. Ghi vào biến môi trường GitHub Actions
           with open(os.environ["GITHUB_ENV"], "a") as f:
@@ -148,6 +162,7 @@ jobs:
           masked_key = key_id[:4] + "..." + key_id[-4:] if len(key_id) >= 8 else "***"
           print(f"AWS credentials configured successfully. Access Key: {masked_key}, Region: {region}")
           EOF
+
 
 
       - name: Verify AWS Connection
