@@ -29,8 +29,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip setuptools<70
+          pip install --upgrade pip
           pip install -r requirements.txt pytest
+
 
       - name: Run unit tests
         # 1. Chạy pytest trên thư mục tests/ với cờ -v
@@ -58,8 +59,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip setuptools<70
+          pip install --upgrade pip
           pip install -r requirements.txt
+
 
       - name: Authenticate to Cloud Storage (AWS)
         # 2. Đọc secret CLOUD_CREDENTIALS và export các biến môi trường AWS
