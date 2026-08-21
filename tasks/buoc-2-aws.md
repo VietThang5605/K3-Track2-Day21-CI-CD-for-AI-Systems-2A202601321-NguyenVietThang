@@ -92,33 +92,204 @@ dvc push
 
 ---
 
-## 2.4 Tạo EC2 Instance Trên AWS
+## 2.4 Tạo EC2 Instance Trên AWS (2 Cách Lựa Chọn)
 
-1. Vào **AWS Console** $\rightarrow$ **EC2** $\rightarrow$ **Launch instances**:
+Bạn có thể chọn **Cách 1 (Giao diện Web)** nếu muốn thao tác trực quan nhanh, hoặc **Cách 2 (Terraform - IaC)** nếu muốn tự động hóa hạ tầng chuẩn DevOps.
+
+---
+
+### Cách 1: Sử dụng Giao diện Web (AWS Console)
+
+1. Đăng nhập vào **AWS Console** $\rightarrow$ Tìm và mở dịch vụ **EC2** $\rightarrow$ Nhấn **Launch instances**:
    - **Name:** `mlops-serve`
-   - **OS Image:** `Ubuntu Server 22.04 LTS (HVM), SSD Volume Type` (64-bit x86 hoặc Arm).
-   - **Instance type:** `t2.micro` hoặc `t3.micro` (Free Tier).
-   - **Key pair:** Chọn key pair có sẵn hoặc tạo mới (ví dụ: `mlops-key.pem`), tải file về máy và cấp quyền:
-     ```bash
-     chmod 400 ~/.ssh/mlops-key.pem
-     ```
-   - **Network settings (Security Group):**
-     - Cho phép **SSH (Port 22)** từ `0.0.0.0/0` (hoặc IP cá nhân của bạn).
-     - Thêm rule **Custom TCP**: **Port 8000** từ `0.0.0.0/0` (dành cho API suy luận).
-2. Nhấn **Launch instance**.
-3. Sau khi instance chạy, sao chép **Public IPv4 Address** (ví dụ: `54.254.x.x`). Đặt biến:
+   - **Application and OS Images:** Chọn **Ubuntu** $\rightarrow$ Bản `Ubuntu Server 22.04 LTS (HVM), SSD Volume Type` (Free Tier eligible).
+   - **Instance type:** `t2.micro` (hoặc `t3.micro` tùy theo Region).
+   - **Key pair (login):** Nhấn *Create new key pair* (hoặc chọn key có sẵn):
+     - Key pair name: `mlops-key`
+     - Key pair type: `RSA`
+     - Private key file format: `.pem`
+     - Tải file `mlops-key.pem` về máy và lưu vào thư mục `~/.ssh/` rồi cấp quyền:
+       ```bash
+       chmod 400 ~/.ssh/mlops-key.pem
+       ```
+   - **Network settings (Firewall / Security Group):**
+     - Chọn *Create security group*.
+     - Tích chọn **Allow SSH traffic from** $\rightarrow$ Chọn `Anywhere` (`0.0.0.0/0`).
+     - Nhấn nút **Add security group rule**:
+       - Type: `Custom TCP`
+       - Port range: `8000`
+       - Source type: `Anywhere` (`0.0.0.0/0`) $\rightarrow$ *(Phục vụ endpoint API suy luận)*.
+2. Nhấn nút màu cam **Launch instance**.
+3. Vào danh sách **Instances**, đợi instance chuyển sang trạng thái *Running*, sao chép **Public IPv4 address** (ví dụ: `54.254.120.45`):
    ```bash
    export VM_HOST="<PUBLIC_IPV4_CUA_EC2>"
    ```
 
 ---
 
+### Cách 2: Sử Dụng Terraform (Khuyến Nghị - Tự Động Hóa 100%)
+
+> [!NOTE]
+> **Terraform** là công cụ Infrastructure as Code (IaC) giúp bạn định nghĩa máy chủ EC2, tường lửa (Security Group) và Key Pair bằng code. Khi cần tạo mới chỉ cần 1 lệnh, và khi kết thúc lab chỉ cần 1 lệnh là dọn sạch tài nguyên.
+
+#### Bước 2.4.1: Kiểm tra cài đặt Terraform
+Chạy lệnh kiểm tra trên máy:
+```bash
+terraform version
+```
+*(Nếu chưa có, cài nhanh bằng Homebrew trên Mac: `brew install terraform`)*.
+
+#### Bước 2.4.2: Chuẩn bị SSH Key
+Nếu bạn chưa có SSH key `~/.ssh/id_rsa.pub` hoặc `~/.ssh/mlops_deploy.pub`, tạo nhanh một key:
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/mlops_deploy -N "" -C "mlops-deploy-key"
+```
+
+#### Bước 2.4.3: Tạo file cấu hình Terraform
+Tạo thư mục `infra/` và tạo file `infra/main.tf`:
+
+```hcl
+# 1. Cấu hình Terraform Provider cho AWS
+terraform {
+  required_version = ">= 1.0.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+# 2. Khai báo Region (trùng với region bạn đã tạo S3 Bucket)
+provider "aws" {
+  region = "ap-southeast-1" # Đổi thành region của bạn nếu khác
+}
+
+# 3. Tự động tìm AMI Ubuntu 22.04 LTS mới nhất từ Canonical
+data "aws_ami" "ubuntu" {
+  most_recent = true
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+
+  owners = ["099720109477"] # Canonical ID chính chủ
+}
+
+# 4. Đăng ký SSH Public Key lên AWS EC2
+resource "aws_key_pair" "deployer" {
+  key_name   = "mlops-deploy-key"
+  public_key = file("~/.ssh/mlops_deploy.pub") # Đường dẫn đến public key trên máy bạn
+}
+
+# 5. Tạo Security Group (Tường lửa cho phép Port 22 và Port 8000)
+resource "aws_security_group" "mlops_sg" {
+  name        = "mlops-serve-sg"
+  description = "Cho phep SSH (port 22) va Inference API (port 8000)"
+
+  # Cho phép kết nối SSH (Port 22)
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Cho phép kết nối API FastAPI (Port 8000)
+  ingress {
+    description = "FastAPI Inference API"
+    from_port   = 8000
+    to_port     = 8000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Cho phép máy chủ EC2 kết nối ra ngoài Internet để cài thư viện
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "mlops-serve-sg"
+  }
+}
+
+# 6. Khởi tạo EC2 Instance (t2.micro / Free tier)
+resource "aws_instance" "mlops_server" {
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = "t2.micro"
+  key_name               = aws_key_pair.deployer.key_name
+  vpc_security_group_ids = [aws_security_group.mlops_sg.id]
+
+  root_block_device {
+    volume_size = 10 # 10 GB SSD
+    volume_type = "gp3"
+  }
+
+  tags = {
+    Name = "mlops-serve"
+  }
+}
+
+# 7. In ra địa chỉ Public IP sau khi khởi tạo thành công
+output "ec2_public_ip" {
+  description = "Public IP cua may chu EC2 dung cho GitHub Actions Secrets"
+  value       = aws_instance.mlops_server.public_ip
+}
+```
+
+#### Bước 2.4.4: Chạy Terraform để tạo máy ảo
+Tại terminal, chuyển vào thư mục `infra/`:
+```bash
+cd infra
+
+# Khởi tạo provider
+terraform init
+
+# Xem trước các tài nguyên sẽ được tạo
+terraform plan
+
+# Áp dụng tạo hạ tầng (gõ 'yes' khi được hỏi)
+terraform apply -auto-approve
+```
+
+Sau khi hoàn thành, terminal sẽ xuất ra:
+```text
+Outputs:
+ec2_public_ip = "54.254.120.45"
+```
+Bạn lưu IP này vào biến môi trường:
+```bash
+export VM_HOST="54.254.120.45" # Thay bằng IP thực tế của bạn
+cd ..
+```
+
+*(Mẹo: Khi làm xong toàn bộ bài lab, nếu muốn xóa máy EC2 để không tốn tài nguyên, bạn chỉ cần vào `infra/` và gõ `terraform destroy -auto-approve`)*.
+
+---
+
 ## 2.5 Cấu Hình Ban Đầu Cho EC2 Instance
 
 1. **SSH vào EC2 từ máy local:**
-   ```bash
-   ssh -i ~/.ssh/mlops-key.pem ubuntu@$VM_HOST
-   ```
+   - **Nếu dùng Terraform (Cách 2):**
+     ```bash
+     ssh -i ~/.ssh/mlops_deploy ubuntu@$VM_HOST
+     ```
+   - **Nếu dùng Console Web (Cách 1):**
+     ```bash
+     ssh -i ~/.ssh/mlops-key.pem ubuntu@$VM_HOST
+     ```
+   *(Lần đầu kết nối, terminal hỏi `Are you sure you want to continue connecting (yes/no)?`, bạn gõ `yes`)*.
 
 2. **Cài đặt các thư viện cần thiết bên trong EC2:**
    ```bash
@@ -198,22 +369,25 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
 ```
 
-**Copy file `serve.py` lên EC2 (từ máy local):**
-```bash
-scp -i ~/.ssh/mlops-key.pem src/serve.py ubuntu@$VM_HOST:~/src/serve.py
-```
+**Copy file `serve.py` lên EC2 (chạy từ máy local):**
+- **Nếu dùng Terraform:**
+  ```bash
+  scp -i ~/.ssh/mlops_deploy src/serve.py ubuntu@$VM_HOST:~/src/serve.py
+  ```
+- **Nếu dùng Console Web:**
+  ```bash
+  scp -i ~/.ssh/mlops-key.pem src/serve.py ubuntu@$VM_HOST:~/src/serve.py
+  ```
 
 ---
 
 ## 2.7 Cấu Hình Systemd Service Trên EC2
 
-SSH lại vào EC2 và tạo file service tự động:
+SSH lại vào EC2:
+- **Nếu dùng Terraform:** `ssh -i ~/.ssh/mlops_deploy ubuntu@$VM_HOST`
+- **Nếu dùng Console:** `ssh -i ~/.ssh/mlops-key.pem ubuntu@$VM_HOST`
 
-```bash
-ssh -i ~/.ssh/mlops-key.pem ubuntu@$VM_HOST
-```
-
-Chạy lệnh sau trên EC2 (thay các giá trị trong dấu ngoặc `<...>`):
+Chạy lệnh sau trên EC2 (thay các giá trị trong dấu ngoặc `<...>` bằng thông tin thực của bạn):
 
 ```bash
 sudo tee /etc/systemd/system/mlops-serve.service > /dev/null <<EOF
@@ -248,15 +422,13 @@ exit
 
 ## 2.8 Thiết Lập SSH Key Cho GitHub Actions Deploy
 
-Tạo cặp SSH key riêng trên máy local để cấp quyền cho GitHub Actions tự động SSH vào EC2:
+- **Nếu bạn đã dùng Terraform (Cách 2):** Bạn **KHÔNG CẦN LÀM BƯỚC NÀY** vì Terraform đã tự động đăng ký `~/.ssh/mlops_deploy.pub` vào EC2 ngay từ đầu! Bạn chuyển thẳng sang **Bước 2.9**.
+- **Nếu bạn dùng Console Web (Cách 1):** Chạy 2 lệnh sau từ máy local để thêm public key deploy vào EC2:
+  ```bash
+  ssh-keygen -t ed25519 -f ~/.ssh/mlops_deploy -N "" -C "github-actions-deploy"
+  cat ~/.ssh/mlops_deploy.pub | ssh -i ~/.ssh/mlops-key.pem ubuntu@$VM_HOST "cat >> ~/.ssh/authorized_keys"
+  ```
 
-```bash
-# 1. Tạo key chuyên dụng cho CI/CD
-ssh-keygen -t ed25519 -f ~/.ssh/mlops_deploy -N "" -C "github-actions-deploy"
-
-# 2. Đưa public key vào danh sách authorized_keys trên EC2
-cat ~/.ssh/mlops_deploy.pub | ssh -i ~/.ssh/mlops-key.pem ubuntu@$VM_HOST "cat >> ~/.ssh/authorized_keys"
-```
 
 ---
 
