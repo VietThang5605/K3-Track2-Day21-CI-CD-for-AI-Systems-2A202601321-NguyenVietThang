@@ -10,6 +10,9 @@ from sklearn.metrics import accuracy_score, f1_score
 
 EVAL_THRESHOLD = 0.70
 
+if "MLFLOW_TRACKING_URI" not in os.environ:
+    mlflow.set_tracking_uri("sqlite:///mlflow.db")
+
 
 def train(
     params: dict,
