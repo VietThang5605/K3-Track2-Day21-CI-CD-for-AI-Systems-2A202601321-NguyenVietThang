@@ -89,26 +89,18 @@ jobs:
           try:
               data = json.loads(raw)
               if isinstance(data, dict):
-                  for k, v in data.items():
-                      kl = k.lower()
-                      if "access_key" in kl:
-                          key_id = str(v).strip()
-                      elif "secret" in kl:
-                          secret_key = str(v).strip()
-                      elif "region" in kl:
-                          region = str(v).strip()
+                  dl = {k.lower(): str(v).strip() for k, v in data.items()}
+                  key_id = dl.get("aws_access_key_id") or dl.get("access_key_id") or dl.get("access_key") or ""
+                  secret_key = dl.get("aws_secret_access_key") or dl.get("secret_access_key") or dl.get("secret_key") or dl.get("secret") or ""
+                  region = dl.get("aws_region") or dl.get("region") or "ap-southeast-1"
           except Exception:
               try:
                   data = ast.literal_eval(raw)
                   if isinstance(data, dict):
-                      for k, v in data.items():
-                          kl = k.lower()
-                          if "access_key" in kl:
-                              key_id = str(v).strip()
-                          elif "secret" in kl:
-                              secret_key = str(v).strip()
-                          elif "region" in kl:
-                              region = str(v).strip()
+                      dl = {k.lower(): str(v).strip() for k, v in data.items()}
+                      key_id = dl.get("aws_access_key_id") or dl.get("access_key_id") or dl.get("access_key") or ""
+                      secret_key = dl.get("aws_secret_access_key") or dl.get("secret_access_key") or dl.get("secret_key") or dl.get("secret") or ""
+                      region = dl.get("aws_region") or dl.get("region") or "ap-southeast-1"
               except Exception:
                   pass
 
@@ -121,10 +113,10 @@ jobs:
                       k, v = line.split(sep, 1)
                       kl = k.strip().lower()
                       val = v.strip().strip("'\"")
-                      if "access_key" in kl:
-                          key_id = val
-                      elif "secret" in kl:
+                      if "secret" in kl:
                           secret_key = val
+                      elif "access" in kl or "key" in kl:
+                          key_id = val
                       elif "region" in kl:
                           region = val
 
@@ -134,9 +126,9 @@ jobs:
               if m_key:
                   key_id = m_key.group(1)
           
-          if not secret_key and key_id:
-              raw_without_key = raw.replace(key_id, "")
-              m_sec = re.search(r'([A-Za-z0-9/+=]{40})', raw_without_key)
+          if not secret_key:
+              raw_clean = raw.replace(key_id, "") if key_id else raw
+              m_sec = re.search(r'([A-Za-z0-9/+=]{40})', raw_clean)
               if m_sec:
                   secret_key = m_sec.group(1)
 
@@ -162,6 +154,7 @@ jobs:
           masked_key = key_id[:4] + "..." + key_id[-4:] if len(key_id) >= 8 else "***"
           print(f"AWS credentials configured successfully. Access Key: {masked_key}, Region: {region}")
           EOF
+
 
 
 
