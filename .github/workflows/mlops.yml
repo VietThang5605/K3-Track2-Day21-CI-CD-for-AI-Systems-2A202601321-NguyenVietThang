@@ -68,16 +68,33 @@ jobs:
 
 
       - name: Authenticate to Cloud Storage (AWS)
-        # 2. Đọc secret CLOUD_CREDENTIALS và export các biến môi trường AWS
+        env:
+          CREDS: ${{ secrets.CLOUD_CREDENTIALS }}
         run: |
-          echo "Setting up AWS credentials from secrets..."
-          AWS_KEY=$(python -c "import json; creds=json.loads('''${{ secrets.CLOUD_CREDENTIALS }}'''); print(creds.get('aws_access_key_id', ''))")
-          AWS_SECRET=$(python -c "import json; creds=json.loads('''${{ secrets.CLOUD_CREDENTIALS }}'''); print(creds.get('aws_secret_access_key', ''))")
-          AWS_REG=$(python -c "import json; creds=json.loads('''${{ secrets.CLOUD_CREDENTIALS }}'''); print(creds.get('aws_region', 'ap-southeast-1'))")
+          python - <<'EOF'
+          import os, json, ast
+
+          raw = os.environ.get("CREDS", "").strip()
+          creds = {}
+          try:
+              creds = json.loads(raw)
+          except Exception:
+              try:
+                  creds = ast.literal_eval(raw)
+              except Exception as e:
+                  print(f"Warning parsing credentials: {e}")
+
+          key_id = creds.get("aws_access_key_id", "")
+          secret_key = creds.get("aws_secret_access_key", "")
+          region = creds.get("aws_region", "ap-southeast-1")
+
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"AWS_ACCESS_KEY_ID={key_id}\n")
+              f.write(f"AWS_SECRET_ACCESS_KEY={secret_key}\n")
+              f.write(f"AWS_DEFAULT_REGION={region}\n")
           
-          echo "AWS_ACCESS_KEY_ID=$AWS_KEY" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET" >> $GITHUB_ENV
-          echo "AWS_DEFAULT_REGION=$AWS_REG" >> $GITHUB_ENV
+          print("AWS credentials configured successfully.")
+          EOF
 
       - name: Pull data with DVC
         # 3. Pull các file dữ liệu cần thiết từ AWS S3 bằng lệnh dvc pull
@@ -96,12 +113,14 @@ jobs:
 
       - name: Upload model to Cloud Storage (AWS S3)
         # 5. Sử dụng boto3 SDK để upload models/model.pkl lên S3
+        env:
+          BUCKET_NAME: ${{ secrets.CLOUD_BUCKET }}
         run: |
           python - <<'EOF'
           import os
           import boto3
 
-          bucket_name = "${{ secrets.CLOUD_BUCKET }}"
+          bucket_name = os.environ.get("BUCKET_NAME", "")
           s3_key = "models/latest/model.pkl"
           local_file = "models/model.pkl"
 
@@ -110,6 +129,7 @@ jobs:
           s3.upload_file(local_file, bucket_name, s3_key)
           print("Model uploaded successfully to AWS S3!")
           EOF
+
 
       - name: Save metrics as artifact
         uses: actions/upload-artifact@v4
