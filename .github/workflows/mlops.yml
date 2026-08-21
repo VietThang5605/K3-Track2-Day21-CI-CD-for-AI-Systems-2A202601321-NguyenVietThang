@@ -94,6 +94,7 @@ jobs:
               f.write(f"AWS_SECRET_ACCESS_KEY={secret_key}\n")
               f.write(f"AWS_REGION={region}\n")
               f.write(f"AWS_DEFAULT_REGION={region}\n")
+              f.write("AWS_EC2_METADATA_DISABLED=true\n")
 
           # 2. Tạo file cấu hình ~/.aws/credentials và ~/.aws/config cho DVC/s3fs
           aws_dir = os.path.expanduser("~/.aws")
@@ -106,6 +107,11 @@ jobs:
           print("AWS credentials and ~/.aws config created successfully.")
           EOF
 
+      - name: Verify AWS Connection
+        run: |
+          aws sts get-caller-identity
+          aws s3 ls s3://${{ secrets.CLOUD_BUCKET }}/dvc/
+
       - name: Pull data with DVC
         # 3. Cấu hình DVC remote credentials và pull dữ liệu từ AWS S3
         run: |
@@ -113,6 +119,7 @@ jobs:
           dvc remote modify myremote secret_access_key "$AWS_SECRET_ACCESS_KEY" --local
           dvc remote modify myremote region "$AWS_REGION" --local
           dvc pull data/train_phase1.csv.dvc data/eval.csv.dvc -v
+
 
 
 
