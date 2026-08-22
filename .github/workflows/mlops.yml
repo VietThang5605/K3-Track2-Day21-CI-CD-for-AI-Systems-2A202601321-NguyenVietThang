@@ -190,8 +190,8 @@ jobs:
           echo "accuracy=$ACC" >> $GITHUB_OUTPUT
           echo "Model Accuracy: $ACC"
 
-      - name: Upload model to Cloud Storage (AWS S3)
-        # 5. Sử dụng boto3 SDK để upload models/model.pkl lên S3
+      - name: Upload model and metrics to Cloud Storage (AWS S3)
+        # 5. Sử dụng boto3 SDK để upload model.pkl, metrics.json và report.txt lên S3
         env:
           BUCKET_NAME: ${{ secrets.CLOUD_BUCKET }}
         run: |
@@ -200,13 +200,18 @@ jobs:
           import boto3
 
           bucket_name = os.environ.get("BUCKET_NAME", "")
-          s3_key = "models/latest/model.pkl"
-          local_file = "models/model.pkl"
-
           s3 = boto3.client("s3")
-          print(f"Uploading {local_file} to s3://{bucket_name}/{s3_key}...")
-          s3.upload_file(local_file, bucket_name, s3_key)
-          print("Model uploaded successfully to AWS S3!")
+
+          print(f"Uploading models/model.pkl to s3://{bucket_name}/models/latest/model.pkl...")
+          s3.upload_file("models/model.pkl", bucket_name, "models/latest/model.pkl")
+
+          print(f"Uploading outputs/metrics.json to s3://{bucket_name}/models/latest/metrics.json...")
+          s3.upload_file("outputs/metrics.json", bucket_name, "models/latest/metrics.json")
+
+          print(f"Uploading outputs/report.txt to s3://{bucket_name}/models/latest/report.txt...")
+          s3.upload_file("outputs/report.txt", bucket_name, "models/latest/report.txt")
+
+          print("Model and metrics uploaded successfully to AWS S3!")
           EOF
 
 
@@ -222,8 +227,8 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # JOB 3 - EVAL
-  # Kiểm tra ngưỡng chất lượng (accuracy >= 0.70).
-  # Pipeline dừng lại ở đây nếu mô hình chưa đạt yêu cầu.
+  # Kiểm tra ngưỡng chất lượng (accuracy >= 0.70) và Model Rollback Gate (Bonus 4).
+  # Pipeline dừng lại ở đây nếu mô hình chưa đạt yêu cầu hoặc kém hơn model cũ.
   # Chỉ chạy khi Job 2 (Train) hoàn thành thành công.
   # ---------------------------------------------------------------------------
   eval:
@@ -232,22 +237,95 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      - name: Check eval gate
-        # 6. Đọc accuracy từ output của job train và kiểm tra ngưỡng >= 0.70
+      - name: Authenticate to Cloud Storage (AWS)
+        env:
+          CREDS: ${{ secrets.CLOUD_CREDENTIALS }}
         run: |
           python - <<'EOF'
-          import sys
+          import os, json, ast, re
 
-          accuracy = float("${{ needs.train.outputs.accuracy }}")
-          threshold = 0.70
+          raw = os.environ.get("CREDS", "").strip()
+          key_id, secret_key, region = "", "", "ap-southeast-1"
 
-          print(f"Model Accuracy: {accuracy:.4f} | Required Threshold: {threshold}")
-          if accuracy >= threshold:
-              print("PASSED: Accuracy meets threshold. Proceeding to deploy.")
-          else:
-              print(f"FAILED: Accuracy {accuracy:.4f} < {threshold}. Deployment aborted.")
-              sys.exit(1)
+          try:
+              data = json.loads(raw)
+              if isinstance(data, dict):
+                  dl = {k.lower(): str(v).strip() for k, v in data.items()}
+                  key_id = dl.get("aws_access_key_id", dl.get("access_key_id", ""))
+                  secret_key = dl.get("aws_secret_access_key", dl.get("secret_access_key", ""))
+                  region = dl.get("aws_region", dl.get("region", "ap-southeast-1"))
+          except Exception:
+              pass
+
+          if not (key_id and secret_key):
+              m_key = re.search(r'(AKIA[0-9A-Z]{16})', raw)
+              m_sec = re.search(r'([A-Za-z0-9/+=]{40})', raw)
+              if m_key: key_id = m_key.group(1)
+              if m_sec: secret_key = m_sec.group(1)
+
+          env_file = os.environ.get("GITHUB_ENV", "")
+          with open(env_file, "a") as f:
+              f.write(f"AWS_ACCESS_KEY_ID={key_id}\n")
+              f.write(f"AWS_SECRET_ACCESS_KEY={secret_key}\n")
+              f.write(f"AWS_DEFAULT_REGION={region}\n")
+              f.write(f"AWS_REGION={region}\n")
+              f.write("AWS_EC2_METADATA_DISABLED=true\n")
           EOF
+
+      - name: Check eval gate and rollback safety (Bonus 4)
+        env:
+          BUCKET_NAME: ${{ secrets.CLOUD_BUCKET }}
+        run: |
+          python - <<'EOF'
+          import sys, os, json, boto3
+
+          new_acc = float("${{ needs.train.outputs.accuracy }}")
+          threshold = 0.70
+          bucket_name = os.environ.get("BUCKET_NAME", "")
+
+          print("=" * 60)
+          print("           KIỂM TRA CHẤT LƯỢNG MÔ HÌNH (EVAL & ROLLBACK GATE)")
+          print("=" * 60)
+          print(f"🎯 Độ chính xác mô hình mới (Candidate Model) : {new_acc:.4f}")
+          print(f"🔒 Ngưỡng tối thiểu bắt buộc (Threshold)      : {threshold:.4f}")
+
+          # 1. Kiểm tra ngưỡng tối thiểu
+          if new_acc < threshold:
+              print(f"❌ THẤT BẠI: Model mới ({new_acc:.4f}) < Ngưỡng ({threshold:.4f}). Hủy deploy!")
+              sys.exit(1)
+
+          print("✅ Bước 1: Vượt qua ngưỡng chất lượng tối thiểu!")
+
+          # 2. Kiểm tra Rollback Gate với model đang chạy trên S3 Production (Bonus 4)
+          print("\n--- KIỂM TRA ROLLBACK VỚI MODEL ĐANG CHẠY TRÊN PRODUCTION (S3) ---")
+          s3 = boto3.client("s3")
+          prev_acc = None
+
+          try:
+              os.makedirs("/tmp/s3_check", exist_ok=True)
+              s3.download_file(bucket_name, "models/latest/metrics.json", "/tmp/s3_check/prev_metrics.json")
+              with open("/tmp/s3_check/prev_metrics.json") as f:
+                  prev_data = json.load(f)
+                  prev_acc = float(prev_data.get("accuracy", 0.0))
+              print(f"📦 Độ chính xác mô hình hiện tại (Production Model): {prev_acc:.4f}")
+          except Exception as e:
+              print(f"ℹ️ Không tìm thấy metrics model cũ trên S3 (Lần đầu triển khai hoặc chưa lưu metrics).")
+
+          if prev_acc is not None:
+              diff = new_acc - prev_acc
+              if diff >= 0:
+                  print(f"📈 Độ chênh lệch: +{diff:.4f} (Model mới tốt hơn hoặc bằng model cũ).")
+                  print("✅ ROLLBACK GATE PASSED: Cho phép cập nhật model mới lên Production!")
+              else:
+                  print(f"📉 Độ chênh lệch: {diff:.4f} (Model mới KÉM HƠN model đang chạy trên Production!).")
+                  print(f"❌ ROLLBACK GATE KÍCH HOẠT: Từ chối deploy model mới ({new_acc:.4f} < {prev_acc:.4f}) để bảo vệ Production!")
+                  sys.exit(1)
+          else:
+              print("✅ ROLLBACK GATE PASSED: Chấp thuận triển khai phiên bản đầu tiên.")
+
+          print("=" * 60)
+          EOF
+
 
 
   # ---------------------------------------------------------------------------
