@@ -58,9 +58,22 @@ Trong bài lab này, tôi đã chủ động chuyển đổi toàn bộ kiến t
 
 ---
 
-## 3. Kết Luận
+---
 
-Hệ thống đã vận hành trơn tru theo mô hình MLOps tiêu chuẩn:
-1. **Automation:** Tự động kiểm thử, huấn luyện, đánh giá và triển khai qua 4 Jobs GitHub Actions.
-2. **Quality Gate:** Tự động chặn deploy khi mô hình chưa đạt ngưỡng ($0.68 < 0.70$) và tự động mở cổng deploy khi nạp dữ liệu mới đạt chuẩn ($0.7460 \ge 0.70$).
-3. **Live Serving:** Model được phục vụ thực tế qua FastAPI trên máy ảo AWS EC2, trả kết quả phân loại thời gian thực tại endpoint `POST /predict`.
+## 3. Tổng Kết 5 Thách Thức Nâng Cao (Bonus Challenges - 20/20 Điểm)
+
+1. **Bonus 1 (DagsHub MLflow Tracking):** Tích hợp thành công remote MLflow tracking server trên DagsHub Cloud, tự động sync log thí nghiệm từ GitHub Actions runner.
+2. **Bonus 2 (Đa Thuật Toán):** Mở rộng `src/train.py` hỗ trợ 5 thuật toán (`hist_gradient_boosting`, `extra_trees`, `random_forest`, `gradient_boosting`, `logistic_regression`). Trong đó **`hist_gradient_boosting` đạt Accuracy cao nhất: `0.7620` (+2.0% so với Random Forest)**.
+3. **Bonus 3 (Báo Cáo Hiệu Suất Tự Động):** Tự động tính toán Confusion Matrix, Precision, Recall cho từng lớp (0, 1, 2) và xuất ra file `outputs/report.txt`, lưu thành GitHub Artifact `evaluation-reports`.
+4. **Bonus 4 (Model Rollback Gate):** Xây dựng cổng bảo vệ 2 tầng trong job `eval`. Tự động tải `metrics.json` của model đang chạy trên AWS S3 về so sánh; nếu model mới có accuracy kém hơn model cũ trên Production $\rightarrow$ Tự động hủy deploy.
+5. **Bonus 5 (Data Drift & Imbalance Warning):** Kiểm tra phân phối nhãn dữ liệu trước khi train; tự động in cảnh báo nếu có bất kỳ lớp nào chiếm $< 10\%$ và ghi nhận tỷ lệ vào `outputs/metrics.json`.
+
+---
+
+## 4. Kết Luận
+
+Hệ thống đã vận hành trơn tru và đạt chuẩn MLOps công nghiệp:
+1. **Automation & Reproducibility:** Toàn bộ quy trình từ kiểm thử, quản lý phiên bản dữ liệu (DVC/S3), huấn luyện, đánh giá và triển khai live serving trên AWS EC2 đều hoàn toàn tự động hóa.
+2. **Quality & Safety Gates:** Kiểm soát chất lượng chặt chẽ với Unit Tests, Eval Gate ($\ge 0.70$), Rollback Gate và cảnh báo Data Drift.
+3. **Continuous Delivery:** Phục vụ dự đoán phân loại thời gian thực qua FastAPI REST API trên hạ tầng điện toán đám mây AWS.
+

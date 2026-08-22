@@ -40,7 +40,33 @@ def train(
     X_eval = df_eval.drop(columns=["target"])
     y_eval = df_eval["target"]
 
-    # 3. Lựa chọn thuật toán dựa trên tham số model_type
+    # 3. Kiểm tra phân phối nhãn dữ liệu và cảnh báo Data Drift (Bonus 5)
+    total_samples = len(df_train)
+    class_counts = df_train["target"].value_counts().to_dict()
+    class_distribution = {
+        int(k): round(float(v / total_samples), 4)
+        for k, v in sorted(class_counts.items())
+    }
+
+    print("=" * 70)
+    print("      KIỂM TRA PHÂN PHỐI NHÃN DỮ LIỆU & DATA DRIFT (BONUS 5)         ")
+    print("=" * 70)
+    print(f"Tổng số mẫu huấn luyện : {total_samples}")
+    drift_warnings = []
+    for cls, ratio in class_distribution.items():
+        pct = ratio * 100
+        count = class_counts.get(cls, 0)
+        print(f"  • Lớp {cls}: {count} mẫu ({pct:.2f}%)")
+        if ratio < 0.10:
+            msg = f"WARNING: Class {cls} represents only {pct:.2f}% of data (< 10%). Significant data imbalance / drift detected!"
+            drift_warnings.append(msg)
+            print(f"    ⚠️  {msg}")
+
+    if not drift_warnings:
+        print("  ✅ Tất cả các lớp đều chiếm >= 10% dữ liệu. Phân phối cân bằng tốt.")
+    print("=" * 70)
+
+    # 4. Lựa chọn thuật toán dựa trên tham số model_type
     model_type = params.get("model_type", "random_forest")
     clf_params = {k: v for k, v in params.items() if k != "model_type"}
 
@@ -77,24 +103,26 @@ def train(
 
     with mlflow.start_run():
 
-        # 4. Ghi nhận các siêu tham số và model_type vào MLflow
+        # 5. Ghi nhận các siêu tham số, model_type và phân phối dữ liệu vào MLflow
         mlflow.log_param("model_type", model_type)
         mlflow.log_params(params)
+        for cls, ratio in class_distribution.items():
+            mlflow.log_metric(f"class_{cls}_ratio", ratio)
 
-        # 5. Huấn luyện mô hình
+        # 6. Huấn luyện mô hình
         model.fit(X_train, y_train)
 
-        # 6. Dự đoán trên tập đánh giá và tính accuracy, weighted f1-score
+        # 7. Dự đoán trên tập đánh giá và tính accuracy, weighted f1-score
         preds = model.predict(X_eval)
         acc = float(accuracy_score(y_eval, preds))
         f1 = float(f1_score(y_eval, preds, average="weighted"))
 
-        # 7. Ghi nhận metrics và artifact model vào MLflow
+        # 8. Ghi nhận metrics và artifact model vào MLflow
         mlflow.log_metric("accuracy", acc)
         mlflow.log_metric("f1_score", f1)
         mlflow.sklearn.log_model(model, "model")
 
-        # 8. Tạo báo cáo chi tiết: Precision, Recall theo từng lớp và Confusion Matrix (Bonus 3)
+        # 9. Tạo báo cáo chi tiết: Precision, Recall theo từng lớp và Confusion Matrix (Bonus 3)
         target_names = ["Lop 0 (Thap)", "Lop 1 (Trung Binh)", "Lop 2 (Cao)"]
         cls_report = classification_report(y_eval, preds, target_names=target_names, zero_division=0)
         cm = confusion_matrix(y_eval, preds)
@@ -114,21 +142,28 @@ def train(
             f"======================================================================\n"
         )
 
-        # 9. Lưu metrics và report ra thư mục outputs
+        # 10. Lưu metrics và report ra thư mục outputs (Bonus 3 & Bonus 5)
         os.makedirs("outputs", exist_ok=True)
+        metrics_payload = {
+            "accuracy": acc,
+            "f1_score": f1,
+            "class_distribution": class_distribution,
+            "drift_warnings": drift_warnings,
+        }
         with open("outputs/metrics.json", "w") as f:
-            json.dump({"accuracy": acc, "f1_score": f1}, f, indent=4)
+            json.dump(metrics_payload, f, indent=4)
 
         with open("outputs/report.txt", "w", encoding="utf-8") as f:
             f.write(report_text)
 
         print(report_text)
 
-        # 10. Lưu mô hình ra file models/model.pkl
+        # 11. Lưu mô hình ra file models/model.pkl
         os.makedirs("models", exist_ok=True)
         joblib.dump(model, "models/model.pkl")
 
     return acc
+
 
 
 
