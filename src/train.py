@@ -5,7 +5,13 @@ import yaml
 import json
 import joblib
 import os
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import (
+    RandomForestClassifier,
+    ExtraTreesClassifier,
+    GradientBoostingClassifier,
+    HistGradientBoostingClassifier,
+)
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 
 EVAL_THRESHOLD = 0.70
@@ -20,15 +26,8 @@ def train(
     eval_path: str = "data/eval.csv",
 ) -> float:
     """
-    Huan luyen mo hinh va ghi nhan ket qua vao MLflow.
-
-    Tham so:
-        params     : dict chua cac sieu tham so cho RandomForestClassifier.
-        data_path  : duong dan den file du lieu huan luyen.
-        eval_path  : duong dan den file du lieu danh gia.
-
-    Tra ve:
-        accuracy (float): do chinh xac tren tap danh gia.
+    Huấn luyện mô hình và ghi nhận kết quả vào MLflow.
+    Hỗ trợ đa thuật toán: RandomForest, ExtraTrees, HistGradientBoosting, GradientBoosting, LogisticRegression.
     """
 
     # 1. Đọc dữ liệu huấn luyện và đánh giá
@@ -41,38 +40,72 @@ def train(
     X_eval = df_eval.drop(columns=["target"])
     y_eval = df_eval["target"]
 
+    # 3. Lựa chọn thuật toán dựa trên tham số model_type
+    model_type = params.get("model_type", "random_forest")
+    clf_params = {k: v for k, v in params.items() if k != "model_type"}
+
+    if model_type == "hist_gradient_boosting":
+        model = HistGradientBoostingClassifier(
+            max_iter=clf_params.get("n_estimators", 300),
+            max_depth=clf_params.get("max_depth", 15),
+            learning_rate=clf_params.get("learning_rate", 0.08),
+            random_state=42,
+        )
+    elif model_type == "extra_trees":
+        model = ExtraTreesClassifier(
+            n_estimators=clf_params.get("n_estimators", 400),
+            max_depth=clf_params.get("max_depth", 25),
+            min_samples_split=clf_params.get("min_samples_split", 3),
+            random_state=42,
+        )
+    elif model_type == "gradient_boosting":
+        model = GradientBoostingClassifier(
+            n_estimators=clf_params.get("n_estimators", 200),
+            max_depth=clf_params.get("max_depth", 6),
+            learning_rate=clf_params.get("learning_rate", 0.08),
+            random_state=42,
+        )
+    elif model_type == "logistic_regression":
+        model = LogisticRegression(
+            C=clf_params.get("C", 1.0),
+            max_iter=1000,
+            random_state=42,
+        )
+    else:
+        # Mặc định: RandomForestClassifier
+        model = RandomForestClassifier(**clf_params, random_state=42)
+
     with mlflow.start_run():
 
-        # 3. Ghi nhận các siêu tham số vào MLflow
+        # 4. Ghi nhận các siêu tham số và model_type vào MLflow
+        mlflow.log_param("model_type", model_type)
         mlflow.log_params(params)
 
-        # 4. Khởi tạo và huấn luyện RandomForestClassifier với random_state=42 để đảm bảo tính tái tạo
-        model = RandomForestClassifier(**params, random_state=42)
+        # 5. Huấn luyện mô hình
         model.fit(X_train, y_train)
 
-        # 5. Dự đoán trên tập đánh giá và tính các chỉ số đánh giá (accuracy, weighted f1-score)
+        # 6. Dự đoán trên tập đánh giá và tính accuracy, weighted f1-score
         preds = model.predict(X_eval)
         acc = float(accuracy_score(y_eval, preds))
         f1 = float(f1_score(y_eval, preds, average="weighted"))
 
-        # 6. Ghi nhận chỉ số và mô hình vào MLflow
+        # 7. Ghi nhận metrics và artifact model vào MLflow
         mlflow.log_metric("accuracy", acc)
         mlflow.log_metric("f1_score", f1)
         mlflow.sklearn.log_model(model, "model")
 
-        # 7. In kết quả ra màn hình
-        print(f"Accuracy: {acc:.4f} | F1: {f1:.4f}")
+        # 8. In kết quả ra màn hình
+        print(f"[{model_type}] Accuracy: {acc:.4f} | F1: {f1:.4f}")
 
-        # 8. Lưu metrics ra file outputs/metrics.json để GitHub Actions đọc ở Bước 2
+        # 9. Lưu metrics ra file outputs/metrics.json
         os.makedirs("outputs", exist_ok=True)
         with open("outputs/metrics.json", "w") as f:
             json.dump({"accuracy": acc, "f1_score": f1}, f, indent=4)
 
-        # 9. Lưu mô hình ra file models/model.pkl để upload lên Cloud Storage ở Bước 2
+        # 10. Lưu mô hình ra file models/model.pkl
         os.makedirs("models", exist_ok=True)
         joblib.dump(model, "models/model.pkl")
 
-    # 10. Trả về độ chính xác (accuracy)
     return acc
 
 
@@ -80,3 +113,4 @@ if __name__ == "__main__":
     with open("params.yaml") as f:
         params = yaml.safe_load(f)
     train(params)
+

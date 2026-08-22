@@ -1,5 +1,8 @@
-# Sieu tham so cho mo hinh RandomForestClassifier
-# Thay doi cac gia tri nay giua cac lan chay de thi nghiem (Buoc 1)
-n_estimators: 400
-max_depth: 25
+# Lựa chọn thuật toán: random_forest | extra_trees | hist_gradient_boosting | gradient_boosting | logistic_regression
+model_type: "hist_gradient_boosting"
+
+# Các siêu tham số
+n_estimators: 300
+max_depth: 15
 min_samples_split: 5
+learning_rate: 0.08
