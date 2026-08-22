@@ -12,7 +12,7 @@ from sklearn.ensemble import (
     HistGradientBoostingClassifier,
 )
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
 
 EVAL_THRESHOLD = 0.70
 
@@ -94,19 +94,42 @@ def train(
         mlflow.log_metric("f1_score", f1)
         mlflow.sklearn.log_model(model, "model")
 
-        # 8. In kết quả ra màn hình
-        print(f"[{model_type}] Accuracy: {acc:.4f} | F1: {f1:.4f}")
+        # 8. Tạo báo cáo chi tiết: Precision, Recall theo từng lớp và Confusion Matrix (Bonus 3)
+        target_names = ["Lop 0 (Thap)", "Lop 1 (Trung Binh)", "Lop 2 (Cao)"]
+        cls_report = classification_report(y_eval, preds, target_names=target_names, zero_division=0)
+        cm = confusion_matrix(y_eval, preds)
 
-        # 9. Lưu metrics ra file outputs/metrics.json
+        report_text = (
+            f"======================================================================\n"
+            f"                   BÁO CÁO ĐÁNH GIÁ HIỆU SUẤT MÔ HÌNH                  \n"
+            f"======================================================================\n"
+            f"Thuật toán        : {model_type}\n"
+            f"Tổng mẫu đánh giá : {len(y_eval)}\n"
+            f"Độ chính xác      : {acc:.4f}\n"
+            f"Weighted F1-Score : {f1:.4f}\n\n"
+            f"--- CHI TIẾT THEO TỪNG LỚP (PRECISION, RECALL, F1) ---\n"
+            f"{cls_report}\n\n"
+            f"--- CONFUSION MATRIX (MA TRẬN NHẦM LẪN) ---\n"
+            f"{cm}\n"
+            f"======================================================================\n"
+        )
+
+        # 9. Lưu metrics và report ra thư mục outputs
         os.makedirs("outputs", exist_ok=True)
         with open("outputs/metrics.json", "w") as f:
             json.dump({"accuracy": acc, "f1_score": f1}, f, indent=4)
+
+        with open("outputs/report.txt", "w", encoding="utf-8") as f:
+            f.write(report_text)
+
+        print(report_text)
 
         # 10. Lưu mô hình ra file models/model.pkl
         os.makedirs("models", exist_ok=True)
         joblib.dump(model, "models/model.pkl")
 
     return acc
+
 
 
 if __name__ == "__main__":

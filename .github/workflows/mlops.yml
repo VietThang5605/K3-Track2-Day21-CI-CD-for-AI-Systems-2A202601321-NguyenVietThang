@@ -210,11 +210,14 @@ jobs:
           EOF
 
 
-      - name: Save metrics as artifact
+      - name: Save metrics and report as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: metrics
-          path: outputs/metrics.json
+          name: evaluation-reports
+          path: |
+            outputs/metrics.json
+            outputs/report.txt
+
 
 
   # ---------------------------------------------------------------------------
